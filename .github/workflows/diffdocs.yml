@@ -1,0 +1,73 @@
+name: DiffDocs Repository Intelligence Integration
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  transmit-telemetry:
+    runs-on: ubuntu-latest
+    steps:
+      # Step 1: Checkout full repository git history
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Critical: Fetches all history so git can calculate the delta diff
+
+      # Step 2: Extract metadata and safely stream JSON to your backend via an inline Python runtime
+      - name: Extract Diff and Dispatch Telemetry
+        shell: python
+        env:
+          BASE_BRANCH: ${{ github.base_ref }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          REPO_NAME: ${{ github.repository }}
+          # Paste your temporary ngrok forwarding URL here for testing
+          BACKEND_TARGET_URL: "https://murkiness-slacking-pagan.ngrok-free.dev" 
+        run: |
+          import os
+          import subprocess
+          import json
+          import urllib.request
+
+          # Fetch environment state variables from GitHub context
+          base_branch = os.environ["BASE_BRANCH"]
+          repo_name = os.environ["REPO_NAME"]
+          
+          print(f"Calculating delta diff against target branch: origin/{base_branch}")
+          
+          # Ensure target base branch is locally accessible to calculate diff strings
+          subprocess.run(["git", "fetch", "origin", base_branch], check=True)
+          
+          # Execute native git diff command stream 
+          diff_bytes = subprocess.check_output([
+              "git", "diff", f"origin/{base_branch}...HEAD"
+          ])
+          diff_content = diff_bytes.decode("utf-8", errors="ignore")
+          
+          # Extract the exact absolute commit SHA head
+          commit_sha = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("utf-8").strip()
+
+          # Package tightly into your FastAPI's GitHubWebhookPayload schema structural rules
+          payload = {
+              "repo_identifier": repo_name,
+              "commit_sha": commit_sha,
+              "diff_content": diff_content
+          }
+          
+          # Build network payload request object
+          endpoint_url = f"{os.environ['BACKEND_TARGET_URL'].rstrip('/')}/webhook/github"
+          req = urllib.request.Request(
+              endpoint_url,
+              data=json.dumps(payload).encode("utf-8"),
+              headers={"Content-Type": "application/json"},
+              method="POST"
+          )
+          
+          print(f"Dispatching payload package to core engine endpoint: {endpoint_url}...")
+          try:
+              with urllib.request.urlopen(req) as response:
+                  print(f"🚀 Success! Backend Server Response Status: {response.status}")
+                  print(response.read().decode())
+          except Exception as error:
+              print(f"🚨 Failed transmission linkage to DiffDocs Engine: {error}")
+              raise SystemExit(1)
