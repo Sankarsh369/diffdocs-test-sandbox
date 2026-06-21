@@ -21,53 +21,58 @@ jobs:
           BASE_BRANCH: ${{ github.base_ref }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
           REPO_NAME: ${{ github.repository }}
-          # Paste your temporary ngrok forwarding URL here for testing
-          BACKEND_TARGET_URL: "https://murkiness-slacking-pagan.ngrok-free.dev" 
+          BACKEND_TARGET_URL: "https://murkiness-slacking-pagan.ngrok-free.dev" # Your active Ngrok link
+          # 🔥 Hardcode your matching testing token here for local validation
+          WEBHOOK_SECRET: "SuperSecretDiffDocsToken2026" 
         run: |
           import os
           import subprocess
           import json
+          import hmac
+          import hashlib
           import urllib.request
 
-          # Fetch environment state variables from GitHub context
           base_branch = os.environ["BASE_BRANCH"]
           repo_name = os.environ["REPO_NAME"]
+          secret = os.environ["WEBHOOK_SECRET"]
           
-          print(f"Calculating delta diff against target branch: origin/{base_branch}")
-          
-          # Ensure target base branch is locally accessible to calculate diff strings
           subprocess.run(["git", "fetch", "origin", base_branch], check=True)
-          
-          # Execute native git diff command stream 
-          diff_bytes = subprocess.check_output([
-              "git", "diff", f"origin/{base_branch}...HEAD"
-          ])
+          diff_bytes = subprocess.check_output(["git", "diff", f"origin/{base_branch}...HEAD"])
           diff_content = diff_bytes.decode("utf-8", errors="ignore")
-          
-          # Extract the exact absolute commit SHA head
           commit_sha = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("utf-8").strip()
 
-          # Package tightly into your FastAPI's GitHubWebhookPayload schema structural rules
           payload = {
               "repo_identifier": repo_name,
               "commit_sha": commit_sha,
               "diff_content": diff_content
           }
           
-          # Build network payload request object
+          # Convert payload to strict string format for consistent signing
+          payload_bytes = json.dumps(payload).encode("utf-8")
+          
+          # 🔥 Generate the SHA256 HMAC cryptographic signature fingerprint
+          signature = hmac.new(
+              secret.encode("utf-8"),
+              payload_bytes,
+              hashlib.sha256
+          ).hexdigest()
+
           endpoint_url = f"{os.environ['BACKEND_TARGET_URL'].rstrip('/')}/webhook/github"
           req = urllib.request.Request(
               endpoint_url,
-              data=json.dumps(payload).encode("utf-8"),
-              headers={"Content-Type": "application/json"},
+              data=payload_bytes,
+              headers={
+                  "Content-Type": "application/json",
+                  "X-DiffDocs-Signature": signature # Attach signature in the custom header
+              },
               method="POST"
           )
           
-          print(f"Dispatching payload package to core engine endpoint: {endpoint_url}...")
+          print(f"Dispatching SECURED payload package to core engine...")
           try:
               with urllib.request.urlopen(req) as response:
-                  print(f"🚀 Success! Backend Server Response Status: {response.status}")
+                  print(f"🚀 Success! Status: {response.status}")
                   print(response.read().decode())
           except Exception as error:
-              print(f"🚨 Failed transmission linkage to DiffDocs Engine: {error}")
+              print(f"🚨 Transmission failed or dropped by security shield: {error}")
               raise SystemExit(1)
