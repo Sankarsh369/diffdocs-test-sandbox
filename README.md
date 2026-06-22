@@ -35,3 +35,7 @@ INFO:     Waiting for application startup.
 
 ### Architectural Note
 All background pipelines are configured to communicate using non-blocking asynchronous event handling strategies to maximize server efficiency.
+
+
+
+GEMINI_API_KEY=AIzaSy...your_actual_key...
