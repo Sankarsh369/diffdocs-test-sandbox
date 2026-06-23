@@ -7,6 +7,12 @@ on:
 jobs:
   transmit-telemetry:
     runs-on: ubuntu-latest
+    
+    # 🔥 CRITICAL SECURITY FIX: Explicitly grants permission to write comments back to the PR
+    permissions:
+      pull-requests: write
+      contents: read
+
     steps:
       # Step 1: Checkout full repository git history
       - name: Checkout Code
@@ -21,53 +27,99 @@ jobs:
           BASE_BRANCH: ${{ github.base_ref }}
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
           REPO_NAME: ${{ github.repository }}
-          # Paste your temporary ngrok forwarding URL here for testing
-          BACKEND_TARGET_URL: "https://murkiness-slacking-pagan.ngrok-free.dev" 
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # Built-in token provided automatically by GitHub
+          BACKEND_TARGET_URL: "https://murkiness-slacking-pagan.ngrok-free.dev" # Ensure this matches your active ngrok URL
+          WEBHOOK_SECRET: "SuperSecretDiffDocsToken2026"
         run: |
           import os
           import subprocess
           import json
+          import hmac
+          import hashlib
           import urllib.request
 
-          # Fetch environment state variables from GitHub context
           base_branch = os.environ["BASE_BRANCH"]
           repo_name = os.environ["REPO_NAME"]
+          pr_number = os.environ["PR_NUMBER"]
+          github_token = os.environ["GITHUB_TOKEN"]
+          secret = os.environ["WEBHOOK_SECRET"]
           
-          print(f"Calculating delta diff against target branch: origin/{base_branch}")
-          
-          # Ensure target base branch is locally accessible to calculate diff strings
+          # 1. Gather git delta metrics
           subprocess.run(["git", "fetch", "origin", base_branch], check=True)
-          
-          # Execute native git diff command stream 
-          diff_bytes = subprocess.check_output([
-              "git", "diff", f"origin/{base_branch}...HEAD"
-          ])
+          diff_bytes = subprocess.check_output(["git", "diff", f"origin/{base_branch}...HEAD"])
           diff_content = diff_bytes.decode("utf-8", errors="ignore")
-          
-          # Extract the exact absolute commit SHA head
           commit_sha = subprocess.check_output(["git", "rev-parse", "HEAD"]).decode("utf-8").strip()
 
-          # Package tightly into your FastAPI's GitHubWebhookPayload schema structural rules
           payload = {
               "repo_identifier": repo_name,
               "commit_sha": commit_sha,
               "diff_content": diff_content
           }
           
-          # Build network payload request object
+          # 2. Cryptographically sign the payload packet
+          payload_bytes = json.dumps(payload, sort_keys=True, separators=(',', ':')).encode("utf-8")
+          signature = hmac.new(secret.encode("utf-8"), payload_bytes, hashlib.sha256).hexdigest()
+
+          # 3. Transmit payload to your FastAPI server via ngrok
           endpoint_url = f"{os.environ['BACKEND_TARGET_URL'].rstrip('/')}/webhook/github"
           req = urllib.request.Request(
               endpoint_url,
-              data=json.dumps(payload).encode("utf-8"),
-              headers={"Content-Type": "application/json"},
+              data=payload_bytes,
+              headers={
+                  "Content-Type": "application/json",
+                  "X-DiffDocs-Signature": signature
+              },
               method="POST"
           )
           
-          print(f"Dispatching payload package to core engine endpoint: {endpoint_url}...")
+          print("Dispatching secured payload package to core engine...")
           try:
               with urllib.request.urlopen(req) as response:
-                  print(f"🚀 Success! Backend Server Response Status: {response.status}")
-                  print(response.read().decode())
+                  response_data = json.loads(response.read().decode())
+                  print("🚀 Core Engine Processing Complete!")
+                  
+                  # 4. Extract Gemini's structural analysis data out of the success response
+                  analysis = response_data.get("data", {})
+                  
+                  # 5. Build a gorgeous Markdown comment layout
+                  risk_color = "🔴" if analysis.get("estimated_risk") == "High" else "🟡" if analysis.get("estimated_risk") == "Medium" else "🟢"
+                  
+                  comment_body = f"### 🧠 DiffDocs Repository Intelligence Summary\n\n| 📋 Metric | 🔍 Analysis Telemetry Value |\n| :--- | :--- |\n| **Commit Target** | `{commit_sha[:7]}` |\n| **Architectural Risk** | {risk_color} **{analysis.get('estimated_risk', 'Unknown')}** |\n\n#### 🚀 Feature Additions & Modifications\n"
+                  
+                  for feat in analysis.get("features", []):
+                      comment_body += f"- **{feat.get('file_path')}** ({feat.get('action')}): {feat.get('summary')}\n  - *Justification:* {feat.get('justification')}\n"
+                  
+                  if analysis.get("bug_fixes"):
+                      comment_body += "\n#### 🐛 Resolved Bug Fixes\n"
+                      for bug in analysis["bug_fixes"]:
+                          comment_body += f"- {bug}\n"
+
+                  if analysis.get("breaking_changes"):
+                      comment_body += "\n#### ⚠️ Warning: Potential Breaking Changes\n"
+                      for change in analysis["breaking_changes"]:
+                          comment_body += f"- {change}\n"
+
+                  comment_body += "\n*🧬 Telemetry verified and securely persisted inside MongoDB Atlas Cloud Cluster.*"
+
+                  # 6. Post the comment back directly into the GitHub Pull Request feed
+                  github_api_url = f"https://api.github.com/repos/{repo_name}/issues/{pr_number}/comments"
+                  comment_payload = json.dumps({"body": comment_body}).encode("utf-8")
+                  
+                  comment_req = urllib.request.Request(
+                      github_api_url,
+                      data=comment_payload,
+                      headers={
+                          "Authorization": f"Bearer {github_token}",
+                          "Accept": "application/vnd.github.v3+json",
+                          "Content-Type": "application/json"
+                      },
+                      method="POST"
+                  )
+                  
+                  with urllib.request.urlopen(comment_req) as comment_res:
+                      print("✅ Pull Request commentary posted successfully onto GitHub conversation feed!")
+
           except Exception as error:
-              print(f"🚨 Failed transmission linkage to DiffDocs Engine: {error}")
+              print(f"🚨 Pipeline transmission or commentary execution failed: {error}")
               raise SystemExit(1)
