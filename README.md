@@ -39,3 +39,9 @@ All background pipelines are configured to communicate using non-blocking asynch
 
 
 GEMINI_API_KEY=AIzaSy...your_actual_key...
+
+The HTTP Error 502: Bad Gateway error means that the pipeline broke at the very last inch on your local machine.
+
+In an ngrok setup, a 502 Bad Gateway means:
+
+ngrok is online and received the package from GitHub perfectly, but when it knocked on port 8000 to hand the data over to your FastAPI server, nobody answered. Your FastAPI server is currently offline, crashed, or listening on a different port.
